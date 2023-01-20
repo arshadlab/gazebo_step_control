@@ -46,9 +46,13 @@ public:
   /// Callback from ROS service to enable/disable step control.
   /// \param[in] req SetBool request
   /// \param[out] res SetBool response
-  void OnEnableControl(
+  void OnUpdateControl(
     std_srvs::srv::SetBool::Request::SharedPtr req,
     std_srvs::srv::SetBool::Response::SharedPtr res);
+
+  /// To enable/disable step control.
+  /// \param[in] control_status
+  void UpdateControl(bool step_control_status);
 
   /// Callback from ROS service for step control.
   /// \param[in] req StepControl request
@@ -100,7 +104,7 @@ void GazeboStepControl::Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _
   enablecontrol_service_ = ros_node_->create_service<std_srvs::srv::SetBool>(
     "step_control_enable",
     std::bind(
-      &GazeboStepControl::OnEnableControl, this,
+      &GazeboStepControl::OnUpdateControl, this,
       std::placeholders::_1, std::placeholders::_2));
 
   stepcontrol_service_ = ros_node_->create_service<gazebo_step_control_interface::srv::StepControl>(
@@ -114,6 +118,16 @@ void GazeboStepControl::Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _
   step_complete_pub_ = ros_node_->create_publisher<std_msgs::msg::Empty>(
     "/step_completed",
     rclcpp::QoS(rclcpp::KeepLast(10)).transient_local());
+
+  // Step control flag in plugin sdf
+  auto control_status_sdf = _sdf->Get<bool>("enable_control", false).first;\
+
+  // Step control parameter
+  auto enable_control_param = ros_node_->declare_parameter(
+    "enable_control",
+    rclcpp::ParameterValue(control_status_sdf));
+
+  UpdateControl(enable_control_param.get<bool>());
 }
 
 
@@ -136,13 +150,11 @@ void GazeboStepControl::UpdateEnd(void)
   }
 }
 
-void GazeboStepControl::OnEnableControl(
-  std_srvs::srv::SetBool::Request::SharedPtr _req,
-  std_srvs::srv::SetBool::Response::SharedPtr _res)
+void GazeboStepControl::UpdateControl(bool step_control_status)
 {
   // Delete existing connection (if any)
   world_update_end_event_.reset();
-  step_control_status_ = _req->data;
+  step_control_status_ = step_control_status;
 
   if (step_control_status_ == true) {
     world_update_end_event_ = gazebo::event::Events::ConnectWorldUpdateEnd(
@@ -151,8 +163,14 @@ void GazeboStepControl::OnEnableControl(
   else {
     world_->SetPaused(false);
   }
+}
 
-  _res->success = true;
+void GazeboStepControl::OnUpdateControl(
+  std_srvs::srv::SetBool::Request::SharedPtr _req,
+  std_srvs::srv::SetBool::Response::SharedPtr _res)
+{
+  UpdateControl(_req->data);
+ _res->success = true;
 }
 
 void GazeboStepControl::OnStepControl(
