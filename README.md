@@ -24,7 +24,7 @@ enable_control:   enable/disable step control at startup. default = false
 ...
 <plugin name="gazebo_step_control" filename="libgazebo_step_control.so">
    <ros>
-      <!-- <namespace> ### </namespace> -->
+      <!-- <namespace> ns </namespace> -->
    </ros>
    <enable_control>false</enable_control>
 </plugin>
