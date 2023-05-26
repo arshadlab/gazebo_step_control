@@ -20,15 +20,22 @@
 #include <gazebo_ros/utils.hpp>
 
 #include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/empty.hpp>
 #include <std_msgs/msg/empty.hpp>
 #include <gazebo_step_control_interface/srv/step_control.hpp>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
+const size_t SHARED_MEMORY_SIZE = 1 * 1024 * 1024;
+//#define STORAGE_ID "/tmp/cosim/physics2"
+#define STORAGE_ID "physics"
 class GazeboStepControl : public gazebo::WorldPlugin
 {
 public:
   /// Constructor
   GazeboStepControl();
-
+  ~GazeboStepControl();
   // Documentation inherited
   void Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _sdf) override;
 
@@ -61,6 +68,18 @@ public:
     gazebo_step_control_interface::srv::StepControl::Request::SharedPtr req,
     gazebo_step_control_interface::srv::StepControl::Response::SharedPtr res);
 
+  void OnClearNameSpace(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+  void OnSetNameSpace(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+  void OpenSharedMemory(void);
+
+  void CloseSharedMemory(void);
+
   /// \brief Keep a pointer to the world.
   gazebo::physics::WorldPtr world_;
 
@@ -72,6 +91,10 @@ public:
 
   /// ROS service to handle requests to unpause physics.
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  enablecontrol_service_;
+
+  /// ROS service to handle requests to unpause physics.
+  rclcpp::Service<std_srvs::srv::Empty>::SharedPtr  namespace_reset_service_;
+
 
   /// ROS service to handle requests to unpause physics.
   rclcpp::Service<gazebo_step_control_interface::srv::StepControl>::SharedPtr  stepcontrol_service_;
@@ -94,7 +117,41 @@ public:
   /// If the service call to be blocked untill all steps executed
   bool step_blocking_call_;
 
+  int m_fd;
+  char *m_map;
+  int i;
+
 };
+
+
+GazeboStepControl::~GazeboStepControl()
+{
+  CloseSharedMemory();
+}
+
+void GazeboStepControl::OpenSharedMemory(void)
+{
+
+    m_fd = shm_open(STORAGE_ID, O_RDWR, 0);
+    if (m_fd < 0) {
+        // failed to open existing file, try to create a new one
+        m_fd = shm_open(STORAGE_ID, O_RDWR | O_CREAT, 0666);
+        if (m_fd < 0 || ftruncate(m_fd, SHARED_MEMORY_SIZE) != 0) {
+            return;
+        }
+    }
+    m_map = static_cast<char*>(
+        mmap(NULL, SHARED_MEMORY_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, m_fd, 0));
+}
+
+void GazeboStepControl::CloseSharedMemory(void)
+{
+    if (m_map != NULL) {
+      int res = munmap(m_map, SHARED_MEMORY_SIZE);
+      m_fd = shm_unlink(STORAGE_ID);
+    }
+
+}
 
 void GazeboStepControl::Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _sdf)
 {
@@ -127,6 +184,13 @@ void GazeboStepControl::Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _
     "enable_control",
     rclcpp::ParameterValue(control_status_sdf));
 
+  namespace_reset_service_ = ros_node_->create_service<std_srvs::srv::Empty>(
+    "clear_namespace",
+    std::bind(
+      &GazeboStepControl::OnClearNameSpace, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  OpenSharedMemory();
   UpdateControl(enable_control_param.get<bool>());
 }
 
@@ -148,6 +212,7 @@ void GazeboStepControl::UpdateEnd(void)
         step_complete_pub_->publish(std_msgs::msg::Empty());
     }
   }
+  m_map[0] = i++;
 }
 
 void GazeboStepControl::UpdateControl(bool step_control_status)
@@ -188,6 +253,41 @@ void GazeboStepControl::OnStepControl(
     }
   }
   _res->success = true;
+}
+
+void GazeboStepControl::OnClearNameSpace(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> /*_req*/,
+  std::shared_ptr<std_srvs::srv::Empty::Response>  _res)
+{
+  auto rcl_context = rclcpp::contexts::get_global_default_context()->get_rcl_context();
+  if (rcl_context) {
+      rcl_arguments_t rcl_args = rcl_get_zero_initialized_arguments();
+
+      // Initialize arguments with empty contents
+      rcl_parse_arguments(0,NULL, rcl_get_default_allocator(), &rcl_args);
+
+      // Free up space from previous call
+      rcl_arguments_fini(&rcl_context->global_arguments);
+
+      rcl_context->global_arguments = rcl_args;
+  }
+}
+
+void GazeboStepControl::OnSetNameSpace(
+  const std::shared_ptr<std_srvs::srv::Empty::Request> /*_req*/,
+  std::shared_ptr<std_srvs::srv::Empty::Response>  _res)
+{
+  auto rcl_context = rclcpp::contexts::get_global_default_context()->get_rcl_context();
+  /*
+  rclcpp::arguments::get_global_arguments().emplace_back("--ros-args", "-r", "/test");
+  char * args[] = {"__ns:=new_namespace"};
+    rcl_arguments_t parsed_args = rcl_get_zero_initialized_arguments();
+    rcl_parse_arguments(1, args, rcl_get_default_allocator(), &parsed_args);
+    rclcpp::NodeOptions options;
+    options.arguments(parsed_args);
+    node_->set_node_options(options);
+*/
+  
 }
 
 GZ_REGISTER_WORLD_PLUGIN(GazeboStepControl)
