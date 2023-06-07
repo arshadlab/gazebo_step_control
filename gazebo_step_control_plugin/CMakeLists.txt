@@ -24,6 +24,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(gazebo_dev REQUIRED)
+find_package(gazebo_ros REQUIRED)
 find_package(gazebo_step_control_interface REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -40,6 +41,7 @@ add_library(gazebo_step_control SHARED
 ament_target_dependencies(gazebo_step_control
   "gazebo_step_control_interface"
   "gazebo_dev"
+  "gazebo_ros"
   "std_srvs"
 )
 

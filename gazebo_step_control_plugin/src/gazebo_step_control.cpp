@@ -23,6 +23,7 @@
 #include <std_srvs/srv/empty.hpp>
 #include <std_msgs/msg/empty.hpp>
 #include <gazebo_step_control_interface/srv/step_control.hpp>
+#include <gazebo_step_control_interface/srv/copy_param.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -76,6 +77,10 @@ public:
     const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
     std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
+  void OnCopyParams(
+    const std::shared_ptr<gazebo_step_control_interface::srv::CopyParam::Request> /*_req*/,
+    std::shared_ptr<gazebo_step_control_interface::srv::CopyParam::Response>  _res);
+  
   void OpenSharedMemory(void);
 
   void CloseSharedMemory(void);
@@ -98,6 +103,11 @@ public:
 
   /// ROS service to handle requests to unpause physics.
   rclcpp::Service<gazebo_step_control_interface::srv::StepControl>::SharedPtr  stepcontrol_service_;
+
+  /// ROS service to handle requests xxxx.
+  rclcpp::Service<gazebo_step_control_interface::srv::CopyParam>::SharedPtr  copyparam_service_;
+
+  
 
     /// Connection to world update event, called at every iteration
   gazebo::event::ConnectionPtr world_update_event_;
@@ -190,6 +200,12 @@ void GazeboStepControl::Load(gazebo::physics::WorldPtr _world, sdf::ElementPtr _
       &GazeboStepControl::OnClearNameSpace, this,
       std::placeholders::_1, std::placeholders::_2));
 
+  copyparam_service_ = ros_node_->create_service<gazebo_step_control_interface::srv::CopyParam>(
+    "copy_params",
+    std::bind(
+      &GazeboStepControl::OnCopyParams, this,
+      std::placeholders::_1, std::placeholders::_2));
+
   OpenSharedMemory();
   UpdateControl(enable_control_param.get<bool>());
 }
@@ -270,6 +286,8 @@ void GazeboStepControl::OnClearNameSpace(
       rcl_arguments_fini(&rcl_context->global_arguments);
 
       rcl_context->global_arguments = rcl_args;
+      RCLCPP_INFO(
+      ros_node_->get_logger(), "Namespace cleared");
   }
 }
 
@@ -287,6 +305,27 @@ void GazeboStepControl::OnSetNameSpace(
     options.arguments(parsed_args);
     node_->set_node_options(options);
 */
+  
+}
+
+void GazeboStepControl::OnCopyParams(
+  const std::shared_ptr<gazebo_step_control_interface::srv::CopyParam::Request> _req,
+  std::shared_ptr<gazebo_step_control_interface::srv::CopyParam::Response>  _res)
+{
+    std::ofstream file(_req->filename);
+
+    if (!file)
+    {
+      RCLCPP_ERROR(ros_node_->get_logger(), "Failed to open file: %s", _req->filename.c_str());
+      _res->success = false;
+      return;
+    }
+
+    file << _req->contents;
+    file.close();
+
+    RCLCPP_INFO(ros_node_->get_logger(), "Successfully wrote to file: %s", _req->filename.c_str());
+    _res->success = true;
   
 }
 
